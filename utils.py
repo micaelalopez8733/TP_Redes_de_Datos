@@ -4,11 +4,10 @@ Módulo de utilidades compartidas para cálculo de CRC, construcción y parsing 
 """
 
 import struct
+from typing import Tuple
 
 CRC_POLY = 0x1021
 
-
-# client.py usa es funcion para generar el CRC y server.py para recalcular el CRC
 def crc16_ccitt(data: bytes) -> int:
     """
     Calcula el CRC-16-CCITT bit a bit.
@@ -25,52 +24,73 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
-#El cliente la usa para empaquetar el mensaje antes de enviarlo. Solo tenes que pasarle el numero de secuencia y el mensaje.
-#message lo podes capturar con un escaner
-
-def build_message(seq: int, message: str) -> bytes:
+def build_message(seq: int, message: str, crc: int) -> bytes:
     """
-    Construye el paquete: seq (1 byte) | len(msg) (2 bytes) | msg (bytes) | crc (2 bytes).
-    Calcula CRC sobre (seq + len + msg).
+    Construye el paquete <seq>|<message>|<crc_hex>
+    CRC se pasa como parámetro (ya calculado externamente).
     """
     if seq not in (0, 1):
         raise ValueError("Seq debe ser 0 o 1")
-    msg_bytes = message.encode('utf-8')
-    len_msg = len(msg_bytes)
-    if len_msg > 65535:
-        raise ValueError("Mensaje demasiado largo")
-    
-    # Datos para CRC: seq + len + msg
-    data_for_crc = struct.pack('!BH', seq, len_msg) + msg_bytes
-    crc = crc16_ccitt(data_for_crc)
-    
-    # Paquete completo
-    return struct.pack('!BH', seq, len_msg) + msg_bytes + struct.pack('!H', crc)
+    if not 0 <= crc <= 0xFFFF:
+        raise ValueError("CRC fuera de rango")
+
+    crc_hex = f"{crc:04X}"
+    full_msg_str = f"{seq}|{message}|{crc_hex}"
+    return full_msg_str.encode('utf-8')
 
 
-#Desempaqueta los datos binarios recibidos en tres partes:
-
-    # seq (número de secuencia)
-
-    # message (el texto original en string)
-
-    # crc_recibido (el valor CRC adjuntado por el cliente)
-
-def parse_message(data: bytes) -> tuple[int, str, int]:
+def parse_message(data: bytes) -> Tuple[int, str, int]:
     """
-    Parsea el paquete: extrae seq, mensaje y CRC recibido.
-    Retorna (seq, message, crc_recibido)
+    Parsea el paquete <seq>|<message>|<crc_hex> y retorna (seq, message, crc_int)
     """
-    if len(data) < 5:
-        raise ValueError("Paquete inválido: demasiado corto")
+    try:
+        full_str = data.decode('utf-8')
+        parts = full_str.split('|')
+        if len(parts) != 3:
+            raise ValueError("Formato inválido: no exactamente 3 partes")
+
+        seq_str, message, crc_hex = parts
+        seq = int(seq_str)
+        crc_recibido = int(crc_hex, 16)
+
+        if seq not in (0, 1):
+            raise ValueError("Seq inválido")
+        if not 0 <= crc_recibido <= 0xFFFF:
+            raise ValueError("CRC inválido")
+
+        return seq, message, crc_recibido
+
+    except UnicodeDecodeError:
+        raise ValueError("Datos no válidos como UTF-8")
+
+
+def build_ack(seq: int) -> bytes:
+    """Construye respuesta ACK + seq (1 byte)."""
+    return b'ACK' + struct.pack('!B', seq)
+
+
+def build_nack(seq: int) -> bytes:
+    """Construye respuesta NACK + seq (1 byte)."""
+    return b'NACK' + struct.pack('!B', seq)
+
+
+def parse_ack_nack(response: bytes) -> Tuple[bool, int]:
+    """
+    Parsea respuesta ACK/NACK + seq (1 byte).
+    Retorna (is_ack, seq)
+    """
+    if len(response) < 4:
+        raise ValueError(f"Respuesta demasiado corta: {len(response)} bytes")
     
-    seq, len_msg = struct.unpack('!BH', data[:3])
-    if seq not in (0, 1):
-        raise ValueError("Seq inválido")
-    if len(data) != 3 + len_msg + 2:
-        raise ValueError("Longitud inconsistente")
-    
-    msg_bytes = data[3:3+len_msg]
-    crc_recibido = struct.unpack('!H', data[-2:])[0]
-    
-    return seq, msg_bytes.decode('utf-8'), crc_recibido
+    if response.startswith(b'ACK'):
+        if len(response) < 4:
+            raise ValueError("ACK muy corto")
+        seq = struct.unpack('!B', response[3:4])[0]
+        return True, seq
+    elif response.startswith(b'NACK'):
+        if len(response) < 5:
+            raise ValueError("NACK muy corto")
+        seq = struct.unpack('!B', response[4:5])[0]
+        return False, seq
+    else:
+        raise ValueError(f"Comando inválido: {response[:10]}")

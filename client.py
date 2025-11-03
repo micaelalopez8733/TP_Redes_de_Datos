@@ -3,114 +3,74 @@
 Cliente UDP con verificación CRC y retransmisión.
 Materia: Redes de Datos - Universidad de Pilar
 Docente: Mariana Gil
-
-Objetivo:
-- Enviar mensajes al servidor.
-- Calcular CRC y adjuntarlo al mensaje.
-- Esperar respuesta (ACK/NACK).
-- Retransmitir si hay error o timeout.
 """
 
 import socket
-import struct 
-import time
+from utils import crc16_ccitt, build_message, parse_ack_nack
 
-#Importamos las funciones binarias de nuestro módulo utils.py
-from utils import build_message, parse_ack_nack 
-
-# ===================== CONFIGURACIÓN =====================
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 50000
-TIMEOUT_S = 1.0       # Tiempo máximo de espera (segundos)
-MAX_RETRIES = 5       # Cantidad máxima de reintentos
-# ==========================================================
+TIMEOUT_S = 1.0
+MAX_RETRIES = 5
 
-# ------------------ ENVÍO CON RETRANSMISIÓN ------------------
+
 def send_with_retries(sock, server_addr, seq, message):
     """
-    Envía un mensaje con número de secuencia 'seq' y retransmite
-    si no recibe un ACK en el tiempo establecido.
+    Envía mensaje con número de secuencia y CRC calculado.
+    Retransmite en caso de error o timeout.
     """
     retries = 0
-    
-    # Este bucle controla los intentos de envío (máximo 5)
+    data_for_crc = f"{seq}|{message}".encode('utf-8')
+    crc = crc16_ccitt(data_for_crc)
+    msg_bytes = build_message(seq, message, crc)
+
     while retries < MAX_RETRIES:
         try:
-           # 1. Preparamos el paquete para el envío
-            # Usamos build_message para construir la trama binaria (incluye el CRC).
-            full_msg_bytes = build_message(seq, message)
-            
-            print(f"[Cliente] Enviando mensaje seq={seq} (Intento {retries + 1}/{MAX_RETRIES})")
-            sock.sendto(full_msg_bytes, server_addr) # Enviamos los bytes binarios
+            print(f"[Cliente] Enviando seq={seq} (intento {retries+1}/{MAX_RETRIES})")
+            sock.sendto(msg_bytes, server_addr)
 
-            # 2. Esperamos respuesta
             response, _ = sock.recvfrom(1024)
-            
-            # 3. Verificamos la respuesta del servidor (ACK/NACK)
             is_ack, received_seq = parse_ack_nack(response)
 
             if received_seq != seq:
-                # El servidor respondió con una secuencia diferente, lo ignoramos por seguridad.
-                print(f"[Cliente] Recibido ACK/NACK para seq {received_seq}, esperado {seq}. Ignorando.")
+                print(f"[Cliente] Seq mismatch: {received_seq} vs {seq}")
+                retries += 1
                 continue
 
             if is_ack:
-                # Si el servidor responde ACK, el paquete fue entregado correctamente.
-                print(f"[Cliente] ACK {seq} recibido. Transferencia OK.")
-                return True # Éxito, salimos del bucle.
-
-            elif not is_ack:
-                # Si recibo NACK: Hubo corrupción en la trama, volvemos a intentar.
-                print(f"[Cliente] NACK {seq} recibido. Corrupción detectada. Reintentando...")
-                retries += 1
-            
+                print(f"[Cliente] ACK recibido para seq {seq}")
+                return True
             else:
-                # Si la respuesta es inválida, también reintentamos.
+                print(f"[Cliente] NACK recibido para seq {seq}. Corrupción detectada. Reintentando...")
                 retries += 1
-        
-        # 4. Si fallamos, manejamos el Timeout
+
         except socket.timeout:
-            # Si el servidor no respondió en 1 segundo (paquete o ACK se perdió).
-            print("[Cliente] Timeout. Paquete o ACK perdido. Reintentando...")
+            print("[Cliente] Timeout — reintentando...")
             retries += 1
         except ValueError as e:
-            # Capturamos errores graves (formato incorrecto, etc.).
-            print(f"[Cliente] Error crítico en el paquete: {e}. Devolviendo envío.")
-            return False 
-            
-    # Fallo total de retransmisión
-    # El bucle terminó porque se agotó el máximo de 5 intentos.
-    print(f"[Cliente] FALLO: Agotados los {MAX_RETRIES} intentos. Deteniendo envío.")
+            print(f"[Cliente] Error en respuesta: {e}")
+            retries += 1
+
+    print("[Cliente] Agotados los reintentos. Fallo en envío.")
     return False
 
-
-# ------------------ PROGRAMA PRINCIPAL ------------------
 def main():
-    print(f"[Cliente] Iniciando comunicación con {SERVER_HOST}:{SERVER_PORT}")
-
-    # 1. Creamos el socket UDP y la dirección donde está el servidor
+    print(f"[Cliente] Conectando a {SERVER_HOST}:{SERVER_PORT}")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(TIMEOUT_S)
     server_addr = (SERVER_HOST, SERVER_PORT)
-    
-    # Establecemos el timeout, esto nos ayuda a saber cuándo el paquete o el ACK se perdió
-    sock.settimeout(TIMEOUT_S) 
 
-    seq = 0  # Iniciamos la secuencia que alternará entre 0 y 1
+    seq = 0
 
     while True:
-        # 2. Le pedimos al usuario el mensaje para enviar
-        message = input("Mensaje a enviar (deja vacío para salir) > ") 
-
+        message = input("Mensaje a enviar (vacío para salir) > ")
         if not message:
-            print("[Cliente] Cerrando conexión...")
+            print("[Cliente] Cerrando cliente.")
             break
 
-        # 3. Mandamos el mensaje y esperamos que se confirme el envío
         success = send_with_retries(sock, server_addr, seq, message)
-
-       # 4. Cambiamos la secuencia si el Servidor nos confirmó el envío
         if success:
-            seq = 1 - seq  # Invertimos la secuencia (de 0 a 1, o de 1 a 0).
+            seq = 1 - seq
 
     sock.close()
 
