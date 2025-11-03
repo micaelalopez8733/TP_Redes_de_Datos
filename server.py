@@ -11,7 +11,7 @@ from utils import crc16_ccitt, parse_message, build_ack, build_nack
 
 HOST = "127.0.0.1"
 PORT = 50000
-ERROR_PROB = 0.8
+ERROR_PROB = 0.2
 
 def maybe_corrupt(data: bytes, p: float) -> bytes:
     """
