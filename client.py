@@ -38,7 +38,7 @@ def send_with_retries(sock, server_addr, seq, message):
         try:
            # 1. Preparamos el paquete para el envío
             # Usamos build_message para construir la trama binaria (incluye el CRC).
-            full_msg_bytes = build_message(seq, message) 
+            full_msg_bytes = build_message(seq, message)
             
             print(f"[Cliente] Enviando mensaje seq={seq} (Intento {retries + 1}/{MAX_RETRIES})")
             sock.sendto(full_msg_bytes, server_addr) # Enviamos los bytes binarios
