@@ -25,7 +25,7 @@ def crc16_ccitt(data: bytes) -> int:
     return crc
 
 
-#El cliente la usa para empaquetar el mensaje antes de enviarlo y el servidor para saber cómo leerlo. Solo tenes que pasarle el numero de secuencia y el mensaje.
+#El cliente la usa para empaquetar el mensaje antes de enviarlo. Solo tenes que pasarle el numero de secuencia y el mensaje.
 #message lo podes capturar con un escaner
 
 def build_message(seq: int, message: str) -> bytes:
