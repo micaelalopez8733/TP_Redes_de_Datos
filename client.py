@@ -12,6 +12,7 @@ Objetivo:
 """
 
 import socket
+import struct
 import time
 
 # ===================== CONFIGURACIÓN =====================
@@ -22,7 +23,22 @@ MAX_RETRIES = 5            # Cantidad máxima de reintentos
 # ==========================================================
 
 
-# ------------------ FUNCIÓN CRC ------------------
+# ------------------ FUNCION AUXILIAR ACK/NACK ------------------
+def parse_ack_nack(data: bytes) -> tuple[bool, int]:
+    """
+    Parsea respuesta: retorna (is_ack, seq)
+    """
+    if data.startswith(b'ACK'):
+        seq = struct.unpack('!B', data[3:])[0]
+        return True, seq
+    elif data.startswith(b'NACK'):
+        seq = struct.unpack('!B', data[4:])[0]
+        return False, seq
+    else:
+        raise ValueError("Respuesta inválida")
+
+
+# ------------------ FUNCIÓN CRC ------------------ Esta misma funcion la podes eliminar e importar desde utils.py ya implemnetada
 def crc16_ccitt(data: bytes) -> int:
     """
     Calcula el CRC16-CCITT del mensaje a enviar.
